@@ -1,0 +1,30 @@
+# Environment / secrets — NEVER commit
+.env
+.env.*
+*.env
+!*.env.example
+backend/.env
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+npm-debug.log*
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Misc
+*.log
