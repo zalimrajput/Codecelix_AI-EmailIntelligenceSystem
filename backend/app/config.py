@@ -10,9 +10,9 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("SUPABASE_ANON_KEY", "ANON_KEY"),
     )
-    openai_api_key: str = ""
-    openai_chat_model: str = "gpt-4o-mini"
-    openai_embedding_model: str = "text-embedding-3-small"
+    openrouter_api_key: str = ""
+    openrouter_chat_model: str = "openai/gpt-4o-mini"
+    openrouter_embedding_model: str = "openai/text-embedding-3-small"
     google_client_id: str = Field(
         default="",
         validation_alias=AliasChoices("GOOGLE_CLIENT_ID", "GMAIL_CLIENT_ID"),
@@ -49,20 +49,32 @@ class Settings(BaseSettings):
     def ai_provider(self) -> str:
         if self.gemini_api_key:
             return "gemini"
-        if self.openai_api_key:
-            return "openai"
+        if self.openrouter_api_key:
+            return "openrouter"
         return ""
 
     @property
     def chat_model(self) -> str:
-        return self.gemini_chat_model if self.ai_provider == "gemini" else self.openai_chat_model
+        return (
+            self.gemini_chat_model
+            if self.ai_provider == "gemini"
+            else self.openrouter_chat_model
+        )
+
+    @property
+    def embedding_provider(self) -> str:
+        if self.gemini_api_key:
+            return "gemini"
+        if self.openrouter_api_key:
+            return "openrouter"
+        return ""
 
     @property
     def embedding_model(self) -> str:
         return (
             self.gemini_embedding_model
-            if self.ai_provider == "gemini"
-            else self.openai_embedding_model
+            if self.embedding_provider == "gemini"
+            else self.openrouter_embedding_model
         )
 
 

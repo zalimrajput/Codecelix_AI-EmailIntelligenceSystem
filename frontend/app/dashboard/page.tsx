@@ -334,6 +334,13 @@ function InboxView(props: {
   const [replyText, setReplyText] = useState("");
   const [draftingReply, setDraftingReply] = useState(false);
   const [sendingReply, setSendingReply] = useState(false);
+  const [todayLabel, setTodayLabel] = useState("");
+  useEffect(() => {
+    setTodayLabel(new Date().toLocaleDateString([], {
+      weekday: "long", month: "long", day: "numeric",
+    }).toUpperCase());
+  }, []);
+
   async function star(email: Email) {
     try {
       await api(`/emails/${email.id}`, { method: "PATCH", body: JSON.stringify({ is_starred: !email.is_starred }) });
@@ -391,7 +398,7 @@ function InboxView(props: {
   return <div className={`inbox-layout ${selected ? "has-selection" : ""}`}>
     <section className="inbox-pane">
       <div className="page-heading inbox-heading">
-      <div><span className="eyebrow">{new Date().toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" }).toUpperCase()}</span><h1>Your inbox, in focus.</h1><p>A little less noise. A little more know-how.</p></div>
+      <div><span className="eyebrow">{todayLabel}</span><h1>Your inbox, in focus.</h1><p>A little less noise. A little more know-how.</p></div>
         <button className="button button-primary" onClick={() => setCompose(true)}><span>＋</span> Compose</button>
       </div>
       <div className="inbox-summary">

@@ -8,6 +8,7 @@ from app.security import AuthenticatedUser
 from app.services.ai import VECTOR_DIMENSIONS
 from app.services.email_pipeline import (
     _confidence,
+    _normalize_amount,
     extract_explicit_deadlines,
     process_email,
     split_email,
@@ -33,6 +34,13 @@ class EmailProcessingTests(unittest.TestCase):
         self.assertEqual(_confidence(1.7), 1.0)
         self.assertEqual(_confidence(-0.2), 0.0)
         self.assertIsNone(_confidence("not-a-number"))
+
+    def test_normalize_amount_accepts_grouped_numeric_values(self) -> None:
+        self.assertEqual(_normalize_amount("150,000"), "150000")
+        self.assertEqual(_normalize_amount("150,000.50"), "150000.50")
+        self.assertEqual(_normalize_amount("1250.75"), "1250.75")
+        self.assertIsNone(_normalize_amount("15,00"))
+        self.assertIsNone(_normalize_amount("not an amount"))
 
     def test_extracts_explicit_meeting_date_and_time_from_email_text(self) -> None:
         deadlines = extract_explicit_deadlines(
@@ -109,6 +117,56 @@ class EmailProcessingTests(unittest.TestCase):
 
 
 class EmailPipelineTests(unittest.IsolatedAsyncioTestCase):
+    async def test_process_email_normalizes_grouped_extracted_amount(self) -> None:
+        extracted_rows: list[dict[str, object]] = []
+        analysis_writes: list[tuple[dict[str, object], dict[str, object]]] = []
+
+        class FakeDb:
+            async def insert(self, table, row, **kwargs):
+                if table == "email_processing_runs":
+                    return {"id": "run-amount"}
+                if table == "ai_analyses":
+                    analysis_writes.append((dict(row), dict(kwargs)))
+                if table == "extracted_information":
+                    extracted_rows.append(dict(row))
+                return {"id": f"{table}-1", **row}
+
+            async def select(self, table, query, **kwargs):
+                return []
+
+            async def update(self, table, query, values):
+                return []
+
+            async def delete(self, table, query):
+                return None
+
+        user = AuthenticatedUser(id="user-1", email="user@example.com", _access_token="token")
+        settings = SimpleNamespace(
+            ai_provider="gemini",
+            embedding_model="gemini-embedding-001",
+            chat_model="gemini-flash-latest",
+        )
+        with (
+            patch("app.services.email_pipeline.user_client", return_value=FakeDb()),
+            patch("app.services.email_pipeline.get_settings", return_value=settings),
+            patch(
+                "app.services.email_pipeline.analyze_email",
+                new_callable=AsyncMock,
+                return_value={"extracted": {"amount": "150,000", "currency": "USD"}},
+            ),
+        ):
+            await process_email(user, {"id": "email-amount", "subject": "", "body_text": ""})
+
+        self.assertEqual(
+            extracted_rows,
+            [{"email_id": "email-amount", "amount": "150000", "currency": "USD"}],
+        )
+        self.assertEqual(len(analysis_writes), 1)
+        self.assertEqual(
+            analysis_writes[0][1],
+            {"upsert": True, "on_conflict": "email_id"},
+        )
+
     async def test_embeddings_are_stored_before_ai_analysis_runs(self) -> None:
         events: list[str] = []
         inserted_embeddings: list[dict[str, object]] = []

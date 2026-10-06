@@ -18,9 +18,12 @@ semantic search.
   synchronization.
 - Groups related messages into email threads and processes new messages in a
   shared background pipeline.
-- Uses Gemini or OpenAI, when configured, for email analysis, summaries,
-  classification, extraction, action items, dates, smart replies, and
-  embeddings.
+- Uses Gemini for embeddings and primary chat analysis, with OpenRouter as a
+  chat fallback when Gemini is unavailable due to quota/service errors or
+  network failures.
+- Extracts summaries, classifications, structured fields, action items, and
+  dates from email; supports AI-drafted replies that require approval before
+  Gmail sends them.
 - Supports semantic email search and a grounded AI Assistant with **Ask** and
   **Find emails** modes.
 - Offers inbox filters, action items, upcoming dates, notifications,
@@ -50,7 +53,7 @@ frontend/
 - Python 3.11 or later
 - Node.js 20 or later and npm
 - A Supabase project with PostgreSQL, Auth, and pgvector support
-- At least one AI provider key (Gemini or OpenAI) for AI processing and search
+- At least one AI provider key (Gemini or OpenRouter) for AI processing and search
 - Google OAuth web-client credentials if Gmail integration is needed
 
 ## Local setup (Windows PowerShell)
@@ -76,19 +79,27 @@ The backend settings include:
 | `SUPABASE_URL` | Supabase project URL used by the backend |
 | `SUPABASE_ANON_KEY` | Supabase public/anon key sent with the user's JWT |
 | `DATABASE_URL` | PostgreSQL connection used by migration/verification scripts |
-| `GEMINI_API_KEY` | Gemini chat and embedding provider (takes precedence if set) |
+| `GEMINI_API_KEY` | Gemini primary chat and embedding provider; chat falls back to OpenRouter on quota/service and network failures |
 | `GEMINI_CHAT_MODEL` / `GEMINI_EMBEDDING_MODEL` | Optional Gemini model overrides |
-| `OPENAI_API_KEY` | OpenAI provider, used when Gemini is not configured |
-| `OPENAI_CHAT_MODEL` / `OPENAI_EMBEDDING_MODEL` | Optional OpenAI model overrides |
+| `OPENROUTER_API_KEY` | OpenRouter chat fallback; used directly for chat and embeddings if Gemini is not configured |
+| `OPENROUTER_CHAT_MODEL` / `OPENROUTER_EMBEDDING_MODEL` | Optional OpenRouter model overrides |
 | `GMAIL_CLIENT_ID` / `GMAIL_CLIENT_SECRET` | Google OAuth web-client credentials |
 | `GMAIL_REDIRECT_URI` | OAuth callback; local default is `http://localhost:8000/integrations/gmail/callback` |
 | `APP_SECRET_KEY` | Secret used to sign and validate OAuth state |
 | `GMAIL_TOKEN_FERNET_KEY` | Fernet key used to encrypt Gmail refresh tokens at rest |
 | `FRONTEND_URL` / `CORS_ORIGINS` | Frontend callback URL and allowed browser origins |
 
-The AI provider is selected automatically: a configured `GEMINI_API_KEY` is
-preferred; otherwise the backend uses `OPENAI_API_KEY`. Keep AI, database, and
-Google OAuth secrets in the backend environment only.
+When both keys are configured, Gemini handles chat first. Chat falls back to
+OpenRouter for Gemini HTTP 429/500/502/503/504 responses and network errors;
+Gemini authentication, permission, and model-not-found errors are returned
+instead of hidden by fallback. Embeddings use Gemini whenever its key is
+configured; embedding failures do not fall back to OpenRouter. Without a
+Gemini key, OpenRouter is used directly for chat and embeddings. Both embedding
+models must return 1536 dimensions to match the database's pgvector column.
+Keep AI, database, and Google OAuth secrets in the backend environment only.
+
+Provider settings are cached when the backend starts. Restart Uvicorn after
+changing `backend\.env`.
 
 ### 2. Apply database migrations
 
@@ -166,6 +177,28 @@ The authenticated user connects their own Google account from the application.
 The backend stores only the encrypted refresh token; short-lived access tokens
 are refreshed when needed and are not persisted.
 
+### Email processing and retries
+
+Email creation, import, and Gmail sync save the email record before queueing
+background processing. Processing reuses or creates text chunks, stores any
+missing embeddings for the configured embedding model, and then requests AI
+analysis and structured extraction. Action items and deadlines are stored after
+successful analysis; explicit dates detected from the email text can also be
+saved if analysis fails. An extracted-information row is only written when the
+model returns at least one supported, non-null field, so a missing row can mean
+either analysis failed or no supported fields were found; check the processing
+run and analysis response to distinguish those cases.
+
+Gmail sync returns `202 Accepted` after queueing work; it does not mean every
+email's AI analysis completed successfully. The default sync page contains 25
+messages, and `max_messages` can be set from 1 to 50. Use the returned
+`next_page_token` to sync another page. Check an email's processing status and
+failure reason in its detail response. After fixing provider quota or
+configuration, queue an individual retry with
+`POST /emails/{email_id}/reprocess`. Existing chunks and same-model embeddings
+are reused. Gemini chat can fall back to OpenRouter when eligible errors occur,
+but embedding requests do not use this fallback.
+
 ## Main API areas
 
 All API paths are root-level; the backend does not add an `/api/v1` prefix.
@@ -173,12 +206,12 @@ All API paths are root-level; the backend does not add an `/api/v1` prefix.
 | Area | Paths |
 |---|---|
 | Auth | `/auth/register`, `/auth/login`, `/auth/logout`, `/auth/me` |
-| Account | `/profile`, `/action-items`, `/deadlines`, `/notifications`, `/notification-preferences` |
+| Account | `/profile`, `/action-items`, `/action-items/{id}`, `/deadlines`, `/deadlines/{id}`, `/notifications`, `/notifications/{id}/read`, `/notification-preferences` |
 | Email | `/emails`, `/emails/import`, `/emails/{id}`, `/emails/{id}/analysis`, `/emails/{id}/reprocess`, `/emails/{id}/replies`, `/replies/{id}`, `/replies/{id}/approve`, `/replies/{id}/reject`, `/threads` |
 | Gmail | `/integrations/gmail/authorize`, `/integrations/gmail/callback`, `/integrations/gmail/status`, `/integrations/gmail/exchange`, `/integrations/gmail/sync`, `/integrations/gmail`, `/integrations/gmail/replies/{id}/send` |
 | Assistant | `/assistant/ask`, `/assistant/conversations`, `/assistant/conversations/{id}/messages`, `/assistant/search` |
 | Insights | `/analytics/overview`, `/categories`, `/insights` |
-| Admin | `/admin/overview`, `/admin/users`, `/admin/users/{id}`, `/admin/audit-logs`, `/admin/ai-usage`, `/admin/categories` |
+| Admin | `/admin/overview`, `/admin/users`, `/admin/users/{id}`, `/admin/users/{id}/roles`, `/admin/users/{id}/active`, `/admin/audit-logs`, `/admin/ai-usage`, `/admin/categories` |
 
 See `http://localhost:8000/docs` for request models, methods, and response
 schemas. Endpoint access is protected by application permissions and database

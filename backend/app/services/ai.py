@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import re
 import time
 from datetime import UTC, datetime
@@ -15,9 +16,10 @@ from app.supabase import Supabase
 
 VECTOR_DIMENSIONS = 1536
 EmbeddingTask = Literal["RETRIEVAL_DOCUMENT", "RETRIEVAL_QUERY"]
+logger = logging.getLogger(__name__)
 
 
-async def openai_request(
+async def openrouter_request(
     path: str,
     payload: dict[str, Any],
     *,
@@ -28,22 +30,22 @@ async def openai_request(
     model: str | None = None,
 ) -> dict[str, Any]:
     settings = get_settings()
-    if not settings.openai_api_key:
+    if not settings.openrouter_api_key:
         raise HTTPException(
             status_code=503,
-            detail="AI services are not configured. Set OPENAI_API_KEY on the backend.",
+            detail="OpenRouter is not configured. Set OPENROUTER_API_KEY on the backend.",
         )
     started = time.perf_counter()
     async with httpx.AsyncClient(timeout=90) as client:
         response = await client.post(
-            f"https://api.openai.com/v1/{path}",
+            f"https://openrouter.ai/api/v1/{path}",
             json=payload,
-            headers={"Authorization": f"Bearer {settings.openai_api_key}"},
+            headers={"Authorization": f"Bearer {settings.openrouter_api_key}"},
         )
     if response.is_error:
         raise HTTPException(
             status_code=502,
-            detail=_provider_error_detail("OpenAI", response),
+            detail=_provider_error_detail("OpenRouter", response),
         )
     result = response.json()
     if not isinstance(result, dict):
@@ -83,7 +85,7 @@ async def embed_texts(
     if not texts:
         return []
     settings = get_settings()
-    if settings.ai_provider == "gemini":
+    if settings.embedding_provider == "gemini":
         return await _gemini_embed_texts(
             texts,
             db=db,
@@ -92,12 +94,12 @@ async def embed_texts(
             operation=operation,
             task_type=task_type,
         )
-    if settings.ai_provider != "openai":
+    if settings.embedding_provider != "openrouter":
         raise HTTPException(
             status_code=503,
-            detail="AI services are not configured. Set GEMINI_API_KEY or OPENAI_API_KEY on the backend.",
+            detail="AI services are not configured. Set GEMINI_API_KEY or OPENROUTER_API_KEY on the backend.",
         )
-    result = await openai_request(
+    result = await openrouter_request(
         "embeddings",
         {"model": settings.embedding_model, "input": texts},
         db=db, user_id=user_id, email_id=email_id,
@@ -170,27 +172,69 @@ async def chat(
     email_id: str | None = None,
     operation: str = "ai_assistant",
 ) -> str:
+    content, _ = await _chat_with_model(
+        messages,
+        json_mode=json_mode,
+        db=db,
+        user_id=user_id,
+        email_id=email_id,
+        operation=operation,
+    )
+    return content
+
+
+async def _chat_with_model(
+    messages: list[dict[str, str]],
+    *,
+    json_mode: bool,
+    db: Supabase | None,
+    user_id: str | None,
+    email_id: str | None,
+    operation: str,
+) -> tuple[str, str]:
     settings = get_settings()
     if settings.ai_provider == "gemini":
-        return await _gemini_chat(
-            messages,
-            json_mode=json_mode,
-            db=db,
-            user_id=user_id,
-            email_id=email_id,
-            operation=operation,
-        )
-    if settings.ai_provider != "openai":
+        try:
+            content = await _gemini_chat(
+                messages,
+                json_mode=json_mode,
+                db=db,
+                user_id=user_id,
+                email_id=email_id,
+                operation=operation,
+            )
+            return content, settings.gemini_chat_model
+        except HTTPException as exc:
+            if exc.status_code not in {429, 500, 502, 503, 504} or not settings.openrouter_api_key:
+                raise
+            logger.warning(
+                "Gemini chat failed with HTTP %s; falling back to OpenRouter.",
+                exc.status_code,
+            )
+        except httpx.TransportError as exc:
+            if not settings.openrouter_api_key:
+                raise
+            logger.warning(
+                "Gemini chat transport failed (%s); falling back to OpenRouter.",
+                type(exc).__name__,
+            )
+
+    if not settings.openrouter_api_key:
         raise HTTPException(
             status_code=503,
-            detail="AI services are not configured. Set GEMINI_API_KEY or OPENAI_API_KEY on the backend.",
+            detail="AI services are not configured. Set GEMINI_API_KEY or OPENROUTER_API_KEY on the backend.",
         )
-    payload: dict[str, Any] = {"model": settings.chat_model, "messages": messages}
+    model = (
+        settings.openrouter_chat_model
+        if settings.ai_provider == "gemini"
+        else settings.chat_model
+    )
+    payload: dict[str, Any] = {"model": model, "messages": messages}
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
-    result = await openai_request(
+    result = await openrouter_request(
         "chat/completions", payload, db=db, user_id=user_id, email_id=email_id,
-        operation=operation, model=settings.chat_model,
+        operation=operation, model=model,
     )
     choices = result.get("choices")
     if not isinstance(choices, list) or not choices:
@@ -198,7 +242,7 @@ async def chat(
     content = choices[0].get("message", {}).get("content")
     if not isinstance(content, str) or not content.strip():
         raise HTTPException(status_code=502, detail="AI provider returned an empty response.")
-    return content
+    return content, model
 
 
 async def _gemini_chat(
@@ -271,7 +315,11 @@ async def _gemini_request(path: str, payload: dict[str, Any]) -> dict[str, Any]:
     if response.is_error:
         retry_delay = _gemini_retry_delay(response) if response.status_code in {429, 503} else None
         raise HTTPException(
-            status_code=response.status_code if response.status_code in {429, 503} else 502,
+            status_code=(
+                response.status_code
+                if response.status_code in {400, 401, 403, 404, 429, 503}
+                else 502
+            ),
             detail=_provider_error_detail("Gemini", response),
             headers=(
                 {"Retry-After": str(max(1, int(retry_delay)))}
@@ -354,6 +402,11 @@ def _provider_error_detail(provider: str, response: httpx.Response) -> str:
                 f"Google suggests trying again in about {_format_retry_duration(retry_delay)}. "
                 "Check the AI Studio project and model quota; a new key in the same project shares that quota."
             )
+        if provider != "Gemini":
+            return (
+                f"{provider} rate limit or quota exceeded (HTTP 429{suffix}). "
+                "Check the configured provider account's rate limits and available credits."
+            )
         return (
             f"{provider} rate limit or quota exceeded (HTTP 429{suffix}). "
             "Check the project/model quota and billing; exhausted daily quota requires a quota reset "
@@ -414,7 +467,7 @@ async def analyze_email(
     user_id: str | None = None,
     email_id: str | None = None,
 ) -> dict[str, Any]:
-    raw = await chat(
+    raw, model = await _chat_with_model(
         [
             {
                 "role": "system",
@@ -425,7 +478,8 @@ async def analyze_email(
                     "(0 to 1), short_summary, detailed_summary, reply_required, "
                     "action_required, category, extracted (object with customer_name, "
                     "company_name, phone_number, email_address, order_number, invoice_number, "
-                    "product, amount, currency, mentioned_date, deadline_date, meeting_date, "
+                    "product, amount (plain numeric value without grouping separators or currency symbols), "
+                    "currency, mentioned_date, deadline_date, meeting_date, "
                     "location, requested_action), action_items (array of title, description, "
                     "due_date), and deadlines (array of title, description, original_text, "
                     "deadline_at). Use null for unknown values; never invent facts. "
@@ -446,4 +500,5 @@ async def analyze_email(
         raise HTTPException(status_code=502, detail="AI analysis was not valid JSON.") from exc
     if not isinstance(value, dict):
         raise HTTPException(status_code=502, detail="AI analysis had an invalid data shape.")
+    value["_ai_model"] = model
     return value

@@ -228,7 +228,7 @@ profiles, created_at, updated_at`
 
 ### 3.5 RAG / Embedding layer (migration 001)
 
-> pgvector `vector(1536)` — OpenAI `text-embedding-3-small`.
+> pgvector `vector(1536)` — configured Gemini or OpenRouter embedding model.
 > HNSW index `idx_embeddings_vector` on `embedding vector_cosine_ops` (cosine).
 
 #### `email_chunks` (owner: `user_id`)
@@ -455,7 +455,7 @@ How it works:
 - **Authentication**: users authenticate through Supabase Auth; send the user
   JWT on every request so policies apply to `authenticated`. The `ANON_KEY`
   alone (no JWT) yields no data.
-- **AI API keys** (OpenAI, Gemini etc.) belong in `backend/.env` on the server
+- **AI API keys** (Gemini and OpenRouter) belong in `backend/.env` on the server
   only — never expose them to the frontend and never store them in
   `system_settings.is_secret = false`.
 - **Permission checks**: gate endpoints with

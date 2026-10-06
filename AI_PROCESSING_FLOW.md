@@ -130,11 +130,13 @@ sent email.
 
 Set provider keys in `backend/.env`, never in frontend configuration:
 
-- `GEMINI_API_KEY` selects Gemini when present.
-- Otherwise, `OPENAI_API_KEY` selects OpenAI.
+- `GEMINI_API_KEY` selects Gemini as the primary chat and embedding provider.
+- When Gemini chat encounters a quota, service, or transport failure and
+  `OPENROUTER_API_KEY` is configured, chat falls back to OpenRouter.
+- Without a Gemini key, OpenRouter provides chat and embeddings.
 - Optional model settings are `GEMINI_CHAT_MODEL`,
-  `GEMINI_EMBEDDING_MODEL`, `OPENAI_CHAT_MODEL`, and
-  `OPENAI_EMBEDDING_MODEL`.
+  `GEMINI_EMBEDDING_MODEL`, `OPENROUTER_CHAT_MODEL`, and
+  `OPENROUTER_EMBEDDING_MODEL`.
 
 Provider rate limits, missing credentials, invalid model output, network
 failures, and invalid embeddings can interrupt processing. The API records
@@ -155,4 +157,3 @@ the project's quota.
 | Ask, Find, and owner-scoped vector retrieval | `backend/app/routers/assistant.py` |
 | Analytics and upcoming-date counts | `backend/app/routers/insights.py` |
 | RLS, schema, and pgvector function | `backend/database/migrations/` |
-

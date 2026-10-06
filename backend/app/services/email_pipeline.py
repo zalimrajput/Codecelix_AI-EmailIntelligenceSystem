@@ -2,6 +2,7 @@ import logging
 import re
 import uuid
 from datetime import UTC, date, datetime, time, timedelta
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.config import get_settings
@@ -44,6 +45,7 @@ _DATE_CONTEXT = re.compile(
     r"\b(meeting|scheduled|deadline|due|appointment|interview|call|conference|event)\b",
     re.IGNORECASE,
 )
+_GROUPED_AMOUNT = re.compile(r"[+-]?\d{1,3}(?:,\d{3})+(?:\.\d+)?")
 
 
 async def save_email(db: Any, user_id: str, values: dict[str, Any]) -> dict[str, Any]:
@@ -325,9 +327,11 @@ async def process_email(user: AuthenticatedUser, email: dict[str, Any]) -> None:
             "detailed_summary": str(analysis.get("detailed_summary") or ""),
             "reply_required": bool(analysis.get("reply_required", False)),
             "action_required": bool(analysis.get("action_required", False)),
-            "ai_model": get_settings().chat_model,
+            "ai_model": str(analysis.get("_ai_model") or get_settings().chat_model),
         }
-        await db.insert("ai_analyses", analysis_row)
+        await db.insert(
+            "ai_analyses", analysis_row, upsert=True, on_conflict="email_id"
+        )
         await db.update(
             "emails",
             {"id": f"eq.{email_id}"},
@@ -353,6 +357,13 @@ async def process_email(user: AuthenticatedUser, email: dict[str, Any]) -> None:
                 "meeting_date", "location", "requested_action",
             }
             row = {key: value for key, value in extracted.items() if key in allowed and value is not None}
+            if "amount" in row:
+                amount = _normalize_amount(row["amount"])
+                if amount is None:
+                    logger.warning("Skipping invalid extracted amount for email id %s", email_id)
+                    row.pop("amount")
+                else:
+                    row["amount"] = amount
             if row:
                 await db.insert("extracted_information", {"email_id": email_id, **row})
         for item in analysis.get("action_items", [])[:20]:
@@ -407,6 +418,25 @@ def _confidence(value: Any) -> float | None:
         return min(1.0, max(0.0, float(value)))
     except (ValueError, TypeError):
         return None
+
+
+def _normalize_amount(value: Any) -> str | None:
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if "," in text:
+        if not _GROUPED_AMOUNT.fullmatch(text):
+            return None
+        text = text.replace(",", "")
+    try:
+        amount = Decimal(text)
+    except InvalidOperation:
+        return None
+    if not amount.is_finite():
+        return None
+    return format(amount, "f")
 
 
 def _later_timestamp(current: Any, candidate: Any) -> Any:
