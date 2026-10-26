@@ -222,7 +222,9 @@ def main():
               scalar(cur, "SELECT count(*) FROM public.user_roles") == 1)
         check("A sees non-secret settings but not secret ones",
               scalar(cur, "SELECT count(*) FROM public.system_settings WHERE is_secret") == 0
-              and scalar(cur, "SELECT count(*) FROM public.system_settings WHERE NOT is_secret") == 1)
+              # permanent config rows from migrations 007+008 (admin_email_domains,
+              # authorized_admin_emails) + 1 non-secret test row seeded above
+              and scalar(cur, "SELECT count(*) FROM public.system_settings WHERE NOT is_secret") == 3)
         check("A is not admin", scalar(cur, "SELECT public.is_admin()") is False)
 
         cur.execute("UPDATE public.emails SET subject='hacked' WHERE id = %s", (email_b,))

@@ -40,6 +40,7 @@ backend/
   app/                 FastAPI routes, auth, integrations, and AI services
   database/
     migrations/        Ordered PostgreSQL/Supabase SQL migrations
+    check_db.py
     run_migrations.py
     verify_migration.py
   tests/               Python unittest suite
@@ -113,15 +114,44 @@ python database\run_migrations.py
 python database\verify_migration.py
 ```
 
-Migrations `000`–`006` create the application's full database schema from an
+Migrations `000`–`008` create the application's full database schema from an
 empty Supabase project: core tables, enums, signup/profile setup, email
 categories, RAG/pgvector tables, RBAC permissions, Gmail connection storage,
-reply delivery fields, RLS policies, and guarded admin functions. They are
-applied in filename order and recorded in `public.schema_migrations`.
+reply delivery fields, RLS policies, guarded admin functions, and the
+admin-role auto-assignment mechanisms described below. They are applied in
+filename order and recorded in `public.schema_migrations`.
 Migration 006 enforces owner-only workspaces, including for administrators.
 The verification script runs structural and functional checks against the
 configured database; use it only where its temporary test users can safely be
 created and removed.
+
+### Admin accounts
+
+Roles live only in the `user_roles` table (RLS blocks users from writing it,
+so nobody can self-promote). Two trusted mechanisms assign the `ADMIN` role
+automatically — neither requires manual UUID insertion:
+
+1. **Designated admin email (primary, migration 008).** Put the exact admin
+   email address in `system_settings` key `authorized_admin_emails`
+   (comma-separated for several admins). New signups with that email receive
+   `ADMIN` at profile creation; an existing account is elevated with one call
+   from a trusted server-side connection:
+
+   ```sql
+   UPDATE system_settings SET setting_value = 'admin@company.com'
+   WHERE setting_key = 'authorized_admin_emails';
+   SELECT public.promote_authorized_admins();
+   ```
+
+2. **Company domain (optional, migration 007).** `system_settings` key
+   `admin_email_domains` grants `ADMIN` to any signup whose email domain
+   matches; use only domains the company controls. Empty by default.
+
+Both keys are non-secret rows and empty by default: until one is configured,
+every account receives `USER` only, and entering an admin-looking email in
+the signup form grants nothing — assignment is decided solely by the
+server-side configuration. Admins are routed to the Admin Dashboard
+automatically after login; other users keep the normal User Dashboard flow.
 
 ### 3. Run the backend
 
@@ -253,3 +283,6 @@ python database\verify_migration.py
 - RLS scopes workspace records to `auth.uid()`, including for admins.
 - Admin reports expose only specifically approved profile metadata and
   aggregates; they do not reveal other users' email content.
+- The `ADMIN` role is granted only through the trusted server-side
+  configuration above (`authorized_admin_emails` / `admin_email_domains`);
+  never through user input, and only for mailboxes the company controls.

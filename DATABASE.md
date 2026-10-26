@@ -45,6 +45,8 @@ Control (RBAC), and data isolation (Row Level Security) rules.
 | `migrations/004_gmail_and_rag_api.sql` | Encrypted Gmail OAuth connection storage and caller-scoped pgvector search RPC |
 | `migrations/005_gmail_reply_sending.sql` | Reply sending status and Gmail delivery metadata |
 | `migrations/006_admin_workspace_isolation.sql` | Owner-only workspace/profile RLS and guarded, content-free admin summary/management RPCs |
+| `migrations/007_company_admin_autoassign.sql` | Automatic `ADMIN` for signups with company-domain emails — domain list in `system_settings` key `admin_email_domains` (empty = off), plus `promote_company_admins()` backfill helper |
+| `migrations/008_designated_admin_email.sql` | Automatic `ADMIN` for ONE designated admin email — exact-match list in `system_settings` key `authorized_admin_emails` (empty = off), plus `promote_authorized_admins()` backfill for accounts created before configuration. The current, primary mechanism. |
 
 Applied migrations are recorded in `public.schema_migrations` (RLS-protected
 bookkeeping table) and never re-executed. Migration files may therefore be
@@ -356,6 +358,28 @@ SELECT '<user-uuid>', id FROM roles WHERE name = 'ADMIN';
 
 After that, admins manage roles through the API (`user_roles` / `roles` /
 `permissions` policies are admin-writable).
+
+**Designated-admin email (active mechanism, migration 008):** the exact
+admin email address lives in `system_settings` key `authorized_admin_emails`
+(non-secret, comma-separated for multiple admins). The value is currently
+**empty** — no automatic promotion happens until it is configured; ordinary
+signups always receive `USER` only, and entering an admin-looking email in
+the signup form grants nothing. To designate the company admin, from the
+trusted server-side connection:
+
+```sql
+UPDATE system_settings SET setting_value = 'admin@company.com'
+WHERE setting_key = 'authorized_admin_emails';
+SELECT public.promote_authorized_admins(); -- elevates the existing account
+```
+
+After that the account gets `ADMIN` at profile creation (new signups) or
+immediately via the backfill call (already-existing accounts), and the
+dashboard routes admins to the Admin Dashboard automatically. All data
+access remains governed by RLS — only the role-assignment source changes.
+The migration-007 company-domain trigger also remains available
+(`admin_email_domains`, currently empty) but exact-email designation
+is the safer default.
 
 ---
 

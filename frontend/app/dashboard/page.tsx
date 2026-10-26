@@ -158,6 +158,10 @@ export default function DashboardPage() {
           (nav.some((item) => item.id === requested) || requested === "settings" || requested === "admin")
         ) {
           setView(requested as View);
+        } else if (admin && !requested) {
+          // designated admins land directly in the Admin Dashboard
+          setView("admin");
+          router.replace("/dashboard?view=admin");
         }
         setAuthReady(true);
       } catch (err) {
