@@ -273,6 +273,24 @@ cd "E:\AI Email Intelligence System\backend"
 python database\verify_migration.py
 ```
 
+## Live Deployment
+
+This project is deployed on:
+
+- **Frontend:** https://codecelix-ai-email-intelligence-sys.vercel.app
+- **Backend API:** https://letterwise-api.faable.link
+
+GitHub Repository: https://github.com/zalimrajput/Codecelix_AI-EmailIntelligenceSystem.git
+
+### Frontend (Vercel)
+The Next.js frontend is deployed on Vercel at the URL above. Environment variables are configured in the Vercel dashboard.
+
+### Backend (Faable)
+The FastAPI backend is deployed on Faable at the URL above. Environment variables are configured in the Faable dashboard.
+
+### Local Development
+For local development, see the [Local setup](#local-setup-local-setup) section above.
+
 ## Security notes
 
 - Never commit `backend/.env` or `frontend/.env.local`; they may contain
