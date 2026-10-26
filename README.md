@@ -277,10 +277,15 @@ python database\verify_migration.py
 
 This project is deployed on:
 
-- **Frontend:** https://codecelix-ai-email-intelligence-sys.vercel.app
-- **Backend API:** https://letterwise-api.faable.link
+- **Frontend :** https://codecelix-ai-email-intelligence-sys.vercel.app
 
-GitHub Repository: https://github.com/zalimrajput/Codecelix_AI-EmailIntelligenceSystem.git
+- Backend API : https://codecelix-ai-emailintelligencesystem-8ggl0.faable.link
+
+- API Documentation (Swagger): https://codecelix-ai-emailintelligencesystem-8ggl0.faable.link/docs
+
+- Backend Health Check: https://codecelix-ai-emailintelligencesystem-8ggl0.faable.link/health
+
+- GitHub Repository: https://github.com/zalimrajput/Codecelix_AI-EmailIntelligenceSystem.git
 
 ### Frontend (Vercel)
 The Next.js frontend is deployed on Vercel at the URL above. Environment variables are configured in the Vercel dashboard.
