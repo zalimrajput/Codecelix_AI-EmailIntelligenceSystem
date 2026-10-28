@@ -146,7 +146,7 @@ async def gmail_exchange(body: GmailExchange, user: GmailUser) -> dict[str, str]
 async def sync_gmail(
     user: GmailUser,
     background_tasks: BackgroundTasks,
-    max_messages: int = 25,
+    max_messages: int = 10,
     page_token: str | None = None,
 ) -> dict[str, Any]:
     if not 1 <= max_messages <= 50:

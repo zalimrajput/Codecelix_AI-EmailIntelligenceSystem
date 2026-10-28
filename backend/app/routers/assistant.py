@@ -13,7 +13,7 @@ AssistantUser = Annotated[AuthenticatedUser, Depends(require_permission("ai_assi
 SearchUser = Annotated[AuthenticatedUser, Depends(require_permission("rag_search:use"))]
 MIN_EMAIL_SIMILARITY = 0.7
 MAX_ASSISTANT_REFERENCES = 1
-ASSISTANT_RETRIEVAL_CANDIDATES = 50
+ASSISTANT_RETRIEVAL_CANDIDATES = 20
 
 
 def _relevant_email_matches(

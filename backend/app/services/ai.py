@@ -486,7 +486,7 @@ async def analyze_email(
                     "Use ISO 8601 dates or null. Categories should be concise."
                 ),
             },
-            {"role": "user", "content": f"Subject: {subject}\n\nEmail:\n{body[:30000]}"},
+            {"role": "user", "content": f"Subject: {subject}\n\nEmail:\n{body[:8000]}"},
         ],
         json_mode=True,
         db=db,
