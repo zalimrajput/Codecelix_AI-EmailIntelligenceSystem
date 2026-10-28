@@ -22,7 +22,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("GOOGLE_CLIENT_SECRET", "GMAIL_CLIENT_SECRET"),
     )
     google_redirect_uri: str = Field(
-        default="http://localhost:8000/integrations/gmail/callback",
+        default="https://codecelix-ai-emailintelligencesystem-8ggl0.faable.link/integrations/gmail/callback",
         validation_alias=AliasChoices("GOOGLE_REDIRECT_URI", "GMAIL_REDIRECT_URI"),
     )
     gemini_api_key: str = Field(
